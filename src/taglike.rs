@@ -1,6 +1,6 @@
 use crate::frame::Content;
 use crate::frame::{
-    Comment, EncapsulatedObject, ExtendedText, Frame, Lyrics, Picture, PictureType,
+    Comment, EncapsulatedObject, ExtendedLink, ExtendedText, Frame, Lyrics, Picture, PictureType,
     SynchronisedLyrics, Timestamp,
 };
 use std::borrow::Cow;
@@ -1180,6 +1180,64 @@ pub trait TagLike: private::Sealed {
                         let text_match = text.map(|v| v == com.text).unwrap_or(true);
                         // True if we want to keep the frame.
                         !(descr_match && text_match)
+                    }
+                    _ => {
+                        // A COMM frame must always have content of the Comment type. Remove frames
+                        // that do not fit this requirement.
+                        false
+                    }
+                }
+            } else {
+                true
+            }
+        });
+    }
+
+    /// Adds an extended link (WXXX).
+    ///
+    /// ```
+    #[deprecated(note = "Use add_frame(frame::ExtendedLink{ .. })")]
+    fn add_ext_link(&mut self, ext_link: ExtendedLink) {
+        self.add_frame(ext_link);
+    }
+
+    /// Removes the extended link (WXXX) with the specified key and value.
+    ///
+    /// A key or value may be `None` to specify a wildcard value.
+    ///
+    /// # Example
+    /// ```
+    /// use id3::{Tag, TagLike};
+    /// use id3::frame::ExtendedLink;
+    ///
+    /// let mut tag = Tag::new();
+    ///
+    /// tag.add_frame(ExtendedLink {
+    ///     description: "key1".to_string(),
+    ///     link: "value1".to_string(),
+    /// });
+    /// tag.add_frame(ExtendedLink {
+    ///     description: "key2".to_string(),
+    ///     link: "value2".to_string(),
+    /// });
+    /// assert_eq!(tag.extended_links().count(), 2);
+    ///
+    /// tag.remove_extended_link(Some("key1"), None);
+    /// assert_eq!(tag.extended_links().count(), 1);
+    ///
+    /// tag.remove_extended_link(None, Some("value2"));
+    /// assert_eq!(tag.extended_links().count(), 0);
+    /// ```
+    
+    fn remove_extended_link(&mut self, description: Option<&str>, link: Option<&str>) {
+        self.frames_vec_mut().retain(|frame| {
+            if frame.id() == "WXXX" {
+                match *frame.content() {
+                    Content::ExtendedLink(ref com) => {
+                        let descr_match = description.map(|v| v == com.description).unwrap_or(true);
+                        let link_match = link.map(|v| v == com.link).unwrap_or(true);
+                        // True if we want to keep the frame.
+                        !(descr_match && link_match)
                     }
                     _ => {
                         // A COMM frame must always have content of the Comment type. Remove frames
