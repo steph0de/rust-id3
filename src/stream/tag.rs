@@ -1,4 +1,5 @@
-use crate::storage::{PlainStorage, Storage};
+use crate::chunk;
+use crate::storage::{plain::PlainStorage, Format, Storage, StorageFile};
 use crate::stream::{frame, unsynch};
 use crate::tag::{Tag, Version};
 use crate::taglike::TagLike;
@@ -420,23 +421,55 @@ impl Encoder {
     }
 
     /// Encodes a [`Tag`] and replaces any existing tag in the file.
-    pub fn encode_to_file(&self, tag: &Tag, mut file: &mut fs::File) -> crate::Result<()> {
-        #[allow(clippy::reversed_empty_ranges)]
-        let location = locate_id3v2(&mut file)?.unwrap_or(0..0); // Create a new tag if none could be located.
+    pub fn write_to_file(&self, tag: &Tag, mut file: impl StorageFile) -> crate::Result<()> {
+        let mut probe = [0; 12];
+        let nread = file.read(&mut probe)?;
+        file.seek(io::SeekFrom::Start(0))?;
+        let storage_format = Format::magic(&probe[..nread]);
 
-        let mut storage = PlainStorage::new(file, location);
-        let mut w = storage.writer()?;
-        self.encode(tag, &mut w)?;
-        w.flush()?;
+        match storage_format {
+            Some(Format::Aiff) => {
+                chunk::write_id3_chunk_file::<chunk::AiffFormat>(file, tag, self.version)?;
+            }
+            Some(Format::Wav) => {
+                chunk::write_id3_chunk_file::<chunk::WavFormat>(file, tag, self.version)?;
+            }
+            Some(Format::Header) => {
+                let location = locate_id3v2(&mut file)?;
+                let mut storage = PlainStorage::new(file, location);
+                let mut w = storage.writer()?;
+                self.encode(tag, &mut w)?;
+                w.flush()?;
+            }
+            None => {
+                let mut storage = PlainStorage::new(file, 0..0);
+                let mut w = storage.writer()?;
+                self.encode(tag, &mut w)?;
+                w.flush()?;
+            }
+        };
+
+        Ok(())
+    }
+
+    /// Encodes a [`Tag`] and replaces any existing tag in the file.
+    #[deprecated(note = "Use write_to_file")]
+    pub fn encode_to_file(&self, tag: &Tag, file: &mut fs::File) -> crate::Result<()> {
+        self.write_to_file(tag, file)
+    }
+
+    /// Encodes a [`Tag`] and replaces any existing tag in the file pointed to by the specified path.
+    pub fn write_to_path(&self, tag: &Tag, path: impl AsRef<Path>) -> crate::Result<()> {
+        let mut file = fs::OpenOptions::new().read(true).write(true).open(path)?;
+        self.write_to_file(tag, &mut file)?;
+        file.flush()?;
         Ok(())
     }
 
     /// Encodes a [`Tag`] and replaces any existing tag in the file pointed to by the specified path.
+    #[deprecated(note = "Use write_to_path")]
     pub fn encode_to_path(&self, tag: &Tag, path: impl AsRef<Path>) -> crate::Result<()> {
-        let mut file = fs::OpenOptions::new().read(true).write(true).open(path)?;
-        self.encode_to_file(tag, &mut file)?;
-        file.flush()?;
-        Ok(())
+        self.write_to_path(tag, path)
     }
 }
 
@@ -446,14 +479,8 @@ impl Default for Encoder {
     }
 }
 
-pub fn locate_id3v2(mut reader: impl io::Read + io::Seek) -> crate::Result<Option<Range<u64>>> {
-    let header = match Header::decode(&mut reader) {
-        Ok(v) => v,
-        Err(err) => match err.kind {
-            ErrorKind::NoTag => return Ok(None),
-            _ => return Err(err),
-        },
-    };
+pub fn locate_id3v2(mut reader: impl io::Read + io::Seek) -> crate::Result<Range<u64>> {
+    let header = Header::decode(&mut reader)?;
 
     let tag_size = header.tag_size();
     reader.seek(io::SeekFrom::Start(tag_size))?;
@@ -461,7 +488,7 @@ pub fn locate_id3v2(mut reader: impl io::Read + io::Seek) -> crate::Result<Optio
         .bytes()
         .take_while(|rs| rs.as_ref().map(|b| *b == 0x00).unwrap_or(false))
         .count();
-    Ok(Some(0..tag_size + num_padding as u64))
+    Ok(0..tag_size + num_padding as u64)
 }
 
 #[cfg(test)]
@@ -470,7 +497,7 @@ mod tests {
     use crate::frame::{
         Chapter, Content, EncapsulatedObject, Frame, MpegLocationLookupTable,
         MpegLocationLookupTableReference, Picture, PictureType, Popularimeter, SynchronisedLyrics,
-        SynchronisedLyricsType, TimestampFormat, Unknown,
+        SynchronisedLyricsType, TableOfContents, TimestampFormat, Unknown,
     };
     use std::fs;
     use std::io::{self, Read};
@@ -530,6 +557,13 @@ mod tests {
                     Frame::with_content("TALB", Content::Text("Bar".to_string())),
                     Frame::with_content("TCON", Content::Text("Baz".to_string())),
                 ],
+            });
+            tag.add_frame(TableOfContents {
+                element_id: "table01".to_string(),
+                top_level: true,
+                ordered: true,
+                elements: vec!["01".to_string()],
+                frames: Vec::new(),
             });
             tag.add_frame(MpegLocationLookupTable {
                 frames_between_reference: 1,
@@ -693,6 +727,28 @@ mod tests {
                 "Apple’s September"
             ]
         );
+    }
+
+    #[test]
+    fn read_id3v23_ctoc() {
+        let mut file = fs::File::open("testdata/id3v23_chap.id3").unwrap();
+        let tag = decode(&mut file).unwrap();
+        assert_eq!(tag.tables_of_contents().count(), 1);
+
+        for x in tag.tables_of_contents() {
+            println!("{:?}", x);
+        }
+
+        let ctoc = tag.tables_of_contents().last().unwrap();
+
+        assert_eq!(ctoc.element_id, "toc");
+        assert!(ctoc.top_level);
+        assert!(ctoc.ordered);
+        assert_eq!(
+            ctoc.elements,
+            &["chp0", "chp1", "chp2", "chp3", "chp4", "chp5", "chp6"]
+        );
+        assert!(ctoc.frames.is_empty());
     }
 
     #[test]
@@ -928,35 +984,41 @@ mod tests {
     fn test_locate_id3v22() {
         let file = fs::File::open("testdata/id3v22.id3").unwrap();
         let location = locate_id3v2(file).unwrap();
-        assert_eq!(Some(0..0x0000c3ea), location);
+        assert_eq!(0..0x0000c3ea, location);
     }
 
     #[test]
     fn test_locate_id3v23() {
         let file = fs::File::open("testdata/id3v23.id3").unwrap();
         let location = locate_id3v2(file).unwrap();
-        assert_eq!(Some(0..0x00006c0a), location);
+        assert_eq!(0..0x00006c0a, location);
     }
 
     #[test]
     fn test_locate_id3v24() {
         let file = fs::File::open("testdata/id3v24.id3").unwrap();
         let location = locate_id3v2(file).unwrap();
-        assert_eq!(Some(0..0x00006c0a), location);
+        assert_eq!(0..0x00006c0a, location);
     }
 
     #[test]
     fn test_locate_id3v24_ext() {
         let file = fs::File::open("testdata/id3v24_ext.id3").unwrap();
         let location = locate_id3v2(file).unwrap();
-        assert_eq!(Some(0..0x0000018d), location);
+        assert_eq!(0..0x0000018d, location);
     }
 
     #[test]
     fn test_locate_no_tag() {
         let file = fs::File::open("testdata/mpeg-header").unwrap();
-        let location = locate_id3v2(file).unwrap();
-        assert_eq!(None, location);
+        let location = locate_id3v2(file).unwrap_err();
+        assert!(matches!(
+            location,
+            Error {
+                kind: ErrorKind::NoTag,
+                ..
+            }
+        ));
     }
 
     #[test]

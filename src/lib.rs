@@ -7,8 +7,9 @@
 // * ID3v2.3 <http://id3.org/id3v2.3.0>
 // * ID3v2.4 <http://id3.org/id3v2.4.0-structure>
 
-pub use crate::error::{partial_tag_ok, Error, ErrorKind, Result};
+pub use crate::error::{no_tag_ok, partial_tag_ok, Error, ErrorKind, Result};
 pub use crate::frame::{Content, Frame, Timestamp};
+pub use crate::storage::StorageFile;
 pub use crate::stream::encoding::Encoding;
 pub use crate::stream::tag::Encoder;
 pub use crate::tag::{Tag, Version};

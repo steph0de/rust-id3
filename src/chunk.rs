@@ -1,9 +1,9 @@
-use crate::storage::{PlainStorage, Storage};
-use crate::{Error, ErrorKind, Tag, Version};
+use crate::storage::{plain::PlainStorage, Storage};
+use crate::stream;
+use crate::{Error, ErrorKind, StorageFile, Tag, Version};
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use std::convert::TryFrom;
 use std::fmt;
-use std::fs;
 use std::io::prelude::*;
 use std::io::{BufReader, Seek, SeekFrom};
 use std::{convert::TryInto, io};
@@ -30,13 +30,13 @@ where
 
     let tag_chunk = ChunkHeader::find_id3::<F, _>(&mut reader, eof.into())?;
     let chunk_reader = reader.take(tag_chunk.size.into());
-    Tag::read_from(chunk_reader)
+    stream::tag::decode(chunk_reader)
 }
 
 /// Writes a tag to the given file. If the file contains no previous tag data, a new ID3
 /// chunk is created. Otherwise, the tag is overwritten in place.
 pub fn write_id3_chunk_file<F: ChunkFormat>(
-    mut file: &mut fs::File,
+    mut file: impl StorageFile,
     tag: &Tag,
     version: Version,
 ) -> crate::Result<()> {

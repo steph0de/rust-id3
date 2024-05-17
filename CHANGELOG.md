@@ -1,3 +1,59 @@
+## v1.13.1 (2024-02-26)
+
+### Fix
+
+- Allow MSRV 1.63 with range match usize behavioral change (#129)
+
+## v1.13.0 (2024-02-18)
+
+### Feat
+
+- Add Tag::read_from2 that also reads Aiff/Wav
+- Let write_to_file handle all supported formats
+
+### Refactor
+
+- Split storage.rs
+
+## v1.12.0 (2023-12-30)
+
+### Feat
+
+- Add the no_tag_ok helper function (fixes #122)
+
+## v1.11.0 (2023-12-29)
+
+### Feat
+
+- make file-related APIs compatible with io::Cursor (#121)
+
+### Refactor
+
+- kill redundant array copy (#118)
+
+## v1.10.0 (2023-11-16)
+
+### Feat
+
+- Add write_to_file, for encoding to MP3 files and buffers (#117)
+
+### Fix
+
+- **v1**: Unwrap in remove_from_path
+- io::Cursor resize should zero-fill
+
+## v1.9.0 (2023-10-24)
+
+### Feat
+
+- Added support for Table of contents frame (CTOC) (#116)
+
+## v1.8.0 (2023-09-21)
+
+### Feat
+
+- Added support for Private Frames (PRIV)
+
 ## v1.7.0 (2023-04-13)
 
 ### Feat
